@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Indian Ocean Basin Box (40E–120E, 60S–30N)</name>
+      <description>Grid Resolution: 0.1° (~10 km)</description>
+
+      <Style>
+        <LineStyle>
+          <color>ff0000ff</color>
+          <width>2</width>
+        </LineStyle>
+        <PolyStyle>
+          <color>7d00ffff</color>
+        </PolyStyle>
+      </Style>
+
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              40,-60,0
+              120,-60,0
+              120,30,0
+              40,30,0
+              40,-60,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+
+    </Placemark>
+  </Document>
+</kml>

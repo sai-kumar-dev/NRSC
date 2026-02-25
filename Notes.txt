@@ -1,0 +1,227 @@
+1. set_memory_limits : use only 80 percent of available memory 
+
+
+it is montiored by monitor_memory_usage() function which has set 75 percent as limit if greater than threshold clear_memory called
+
+clear_memory for clearing and gc
+
+
+main () : 
+    global results dir 
+    set_memory_limits
+    config set maybe overwritten by config sent by train mode 
+    device = check cuda else cpu
+    initial mm monitor_memory_usage
+            data_dict : data loaded using load_data() func
+    final mm monitor_memory_usage
+    prepare_data_in_chunks() function to get X,y
+    monitor_memory_usage
+    del data_dict to free mem
+    clear_memory
+    X,y casted to np.float32
+    scalers for x,y initial standard scaler to get X_scaled, y_scaled
+    scaled X,y are converted into tensors X_tensor, y_tensor
+
+    dataset using TensorDataset(X_tensor, y_tensor)
+
+
+    split using random_split
+    train : 70
+    val : 10 (from train)
+    test : 20
+
+    create data loaders for each 
+
+    model initialized for class OceanHeatFluxPINN 
+    model trained using train_pinn() function 
+
+
+    Evaluation section :
+    values are inverse transformed to original scale 
+
+    MSE LOSS
+    sensible and latent metrics are comphrensivly calculated by calculate_comphrensive_metrics()
+
+    save_results() function to result dir
+
+    metrics saved to json file 
+
+    visualizations of (train,val)losses , pred, target 
+
+    inference_example run using run_inference_example() 
+
+    failure handling : Memory Error and other
+    clear_memory()
+
+load_data() : 
+    file check presence 
+    opened using xarray(xr)
+    variable logged in dataset
+    mapping of variables
+    var by var extraction to data_dict with key as variable
+    Get dimensions for reference
+    ocean_mask created using create_ocean_mask()
+    interpolation done using interpolate_nan_values()
+    interpolate only for ocean not land 
+    land ones left as it is nan
+    repeated for all days in loop
+
+prepare_data_in_chunks() :
+    input vars shapes are logged 
+    dimensions are gathered for time, lat, lon
+    ocean_mask is used to correctly make it 3D
+    total_ocean_points are calculated
+    if total_ocean_points > max_samples:
+        effective sample_ratio calculated
+    else:
+        subsampleratio is used 
+
+
+    reshape data to 2D => (time_dim, -1(lat*lon))
+
+    ocean_mask to 2D
+    samples collected to atmost max_samples var
+    ocean_mask is used to filter variables to only have ocean points data
+    make column stack of variables lists for given points at t
+    filter to get only non empty rows where all values are there 
+
+    if the resultant X_t is greater than chunk size randomly select only chunk size indices 
+
+    caluclate windspeed, e_s_sst, e_s_td, fluxes 
+
+    fluxes results are bundled to y
+
+    chunks are appended
+
+    del all variables 
+
+    periodic memory cleanup
+    X,y vertical stacks of all chunks
+    del chunks
+    remove any nan or inf value entries
+
+    returns X,y
+
+interpolate_nan_values() : 
+    check for whether all nan if yes warn else pass
+    valid_mask created
+    if values are less than 4 warn tell atleast 4 needed for interpolation 
+    fill using method  : nearest
+    
+OceanHeatFluxPINN:
+    xavier weight initialization
+    leaky result
+    linear sequential
+
+train_pinn() : 
+    adam optimizer 
+    reduce lr on plateau is scheduled
+    loop and train the model
+    clear_memory()
+    returns train and val losses
+
+calculate_comphrensive_metrics() :
+    rmse, mse, mae, r2 are calculated
+    Different classification strategies based on flux type
+    depending on results of above 
+    accuracy, precision, recall, f1
+    return dict of results
+
+save_results() : 
+    Save model, scalers, and results
+    model, scalers, history, config
+
+create_visualizations():
+    training history, sensible heat flux scatter plot, Latent heat flux scatter plot, Residuals for sensible heat flux, Residuals for latent heat flux, 
+        Distribution of sensible heat flux, Distribution of latent heat flux, Error distribution for sensible heat flux, Error distribution for latent heat flux
+
+run_inference_example() :
+    load trained modle using load_trained_model()
+    predictions made using predict_heat_fluxes()
+    logged and reported
+
+    params taken from results dir 
+    if error warn to train first
+
+load_trained_model(): 
+    returns trained model, scalers
+
+predict_heat_fluxes():
+    function to predict and report values 
+
+
+create_performance_summary(): 
+    check for results dir 
+    load metrics.json
+    create a summary df
+
+if mode is inference :
+    run_inference_example
+
+
+if mode is analysis:
+    check for data file exist path 
+    check for results dir
+    load_trained_model()
+    load_data()
+    prepare_data_in_chunks()
+    analyze_model_sensitvity()
+    predict_heat_fluxes() inference check
+    validate_physics_constraints()
+    calculate ocean_points_per_timestamp
+    n_predictions_needed = min(len(predictions), ocean_points_per_timestep)
+    any of these should not be 0 because to check we need that many predictions
+    if true :
+        create_spatial_visualizations()
+
+    export_predictions_to_netcdf()
+
+analyze_model_sensitvity():
+    take samples of min(1000, len(sample_data))
+    random indices
+    create predictions
+    analyze sensitivity using perturbations(+ or - 10)
+    make preds again
+    calculate gradient approximation for sensitivity caluclation
+    plots for mean vs std for both fluxes
+
+validate_physics_constraints(): 
+    checks for real grounding fact
+    coorcoef sensible heat flux vs temp 
+    heat flux vs wind speed
+    sign consistency for sensible heat flux 
+
+    validation plots 
+
+create_time_series_analysis():
+    time series analysis for given loc 
+    if not given assumed to be a example computed from dict
+    remove nan values
+    make predictions using predict_heat_fluxes() 
+    time converted to datetime 
+    time series plot
+
+
+create_spatial_visualizations():
+    get spatial dimensions
+    create meshgrid
+    min(len(predictions), total_ocean_points) for analysis use
+    apply_smoothing for both fluxes 
+    get 4 plots for combinations of both fluxes 2d and smoothed 
+    check and handle errors 
+
+
+apply_smoothing() :
+    filter for valid data
+    smoothing for valid data
+    interpolate for missing values using interpolate_nan_values()
+    apply gaussian filter
+    restore NaNs
+
+export_predictions_to_netcdf():
+    get dimensions
+    ocean_mask
+    fill predictions into 3D arrays
+    create xarray dataset and add variable attrs
+    
+

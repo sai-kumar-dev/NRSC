@@ -1,0 +1,14 @@
+functions mapping :
+
+analysis : analyze_model_sensitivity, run_comphrensive_analysis
+evaluation : calculate_comphrensive_metrics
+core: logger
+data_utils : load_data, prepare_data_in_chunks, create_ocean_mask, interpolate_nan_values
+inference : run_inference_example, load_trained_model, predict_heat_fluxes
+memory_utils : set_memory_usage, monitor_memory_usage, clear_memory
+models : OceanHeatFluxPINN 
+physics : physics_informed_loss, validate_physics_constraints
+results: save_results, create_performance_summary, export_predictions_to_netcdf
+training_pipeline : train
+training_utils : train_pinn
+visualizations : apply_smoothing, create_spacial_visualizations, create_visualizations
