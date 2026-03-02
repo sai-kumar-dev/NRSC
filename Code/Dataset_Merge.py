@@ -1,207 +1,219 @@
+#!/usr/bin/env python3
 """
-ERA5 PINN Dataset Builder
---------------------------
-
-Purpose:
-    Construct a clean, physically consistent, merged dataset for
-    Physics-Informed Neural Network (PINN) training.
-
-Inputs:
-    - ERA5 oper instant (u10, v10, t2m, sst)
-    - ERA5 oper accum (sshf, slhf)
-    - ERA5 add_parameters instant (sp, d2m)
-
-Outputs:
-    - Single compressed NetCDF:
-        Variables:
-            u10, v10, t2m, sst, d2m, sp, rho,
-            sshf (W/m^2), slhf (W/m^2)
-
-Scientific Notes:
-    - Accumulated flux (J/m^2) converted to W/m^2
-    - Air density computed via ideal gas law
-    - expver explicitly handled
-    - No regridding performed (grid consistency preserved)
-
-Author: [Your Name]
+ERA5 PINN Production Pipeline
+----------------------------------------------------
+Stable single-node pipeline
+- Chronological month sorting
+- Duplicate timestamp removal
+- Flux conversion (J/m^2 -> W/m^2)
+- Air density computation
+- Structural validation
+- Explicit rechunking
+- Zarr v2 backend (stable)
+- Resume-safe checkpoints
 """
 
-import xarray as xr
-import numpy as np
 import os
+import glob
+import numpy as np
+import xarray as xr
+import dask
 
-# ==============================================================
-# CONFIGURATION
-# ==============================================================
+# =============================
+# DASK CONFIG (Single Node)
+# =============================
+
+dask.config.set(scheduler="threads")
+dask.config.set({"array.slicing.split_large_chunks": True})
+
+# =============================
+# CONFIG
+# =============================
 
 BASE_PATH = "nrsc/jayanth_works/era5_inputfluxes"
+OUTPUT_ZARR = "/data/era5_pinn_dataset.zarr"
+CHECKPOINT_DIR = "/data/era5_checkpoints"
 
-OPER_INSTANT_PATH = f"{BASE_PATH}/1990_2025/*/*/data_stream-oper_stepType-instant.nc"
-OPER_ACCUM_PATH   = f"{BASE_PATH}/1990_2025/*/*/data_stream-oper_stepType-accum.nc"
-PARAM_INSTANT_PATH = f"{BASE_PATH}/1990-2025_add_parameters/*/*/data_stream-oper_stepType-instant.nc"
+YEARS = [1990]  # <<< change to range(1990, 2026) after successful test
 
-OUTPUT_FILE = "era5_pinn_dataset_1990_2025.nc"
-
-# Physical constants
-R_D = 287.05  # Gas constant for dry air [J kg^-1 K^-1]
+R_D = 287.05
 SECONDS_PER_HOUR = 3600.0
 
+MONTH_ORDER = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
 
-# ==============================================================
-# UTILITY FUNCTIONS
-# ==============================================================
+# =============================
+# UTILITIES
+# =============================
 
-def load_era5_dataset(path, variables):
-    """
-    Load ERA5 multi-file dataset lazily using xarray + dask.
+def sort_by_month(files):
+    def extract_month(f):
+        folder = os.path.basename(os.path.dirname(f))
+        month_name = folder.split("_")[0].lower()
+        return MONTH_ORDER.get(month_name, 0)
+    return sorted(files, key=extract_month)
 
-    Parameters
-    ----------
-    path : str
-        Glob path to NetCDF files.
-    variables : list
-        Variables to retain from dataset.
 
-    Returns
-    -------
-    xarray.Dataset
-        Cleaned dataset with selected variables.
-    """
+def checkpoint_exists(year):
+    return os.path.exists(f"{CHECKPOINT_DIR}/{year}.done")
+
+
+def write_checkpoint(year):
+    open(f"{CHECKPOINT_DIR}/{year}.done", "w").close()
+
+
+def open_year_dataset(year, stream, variables):
+    path = f"{BASE_PATH}/{stream}/{year}/*/data_stream-oper_stepType-*.nc"
+    files = glob.glob(path)
+
+    if not files:
+        raise RuntimeError(f"No files found for {year} {stream}")
+
+    files = sort_by_month(files)
 
     ds = xr.open_mfdataset(
-        path,
-        combine="by_coords",
-        parallel=True,
-        chunks={"valid_time": 100}
+        files,
+        combine="nested",
+        concat_dim="valid_time",
+        parallel=False,
+        chunks={"valid_time": 24}
     )
 
-    # Handle expver dimension explicitly
-    if "expver" in ds:
+    # Handle expver safely
+    if "expver" in ds.dims:
         ds = ds.sel(expver="0001")
+    elif "expver" in ds.variables:
+        ds = ds.drop_vars("expver")
 
-    # Rename valid_time to time (CF consistency)
     ds = ds.rename({"valid_time": "time"})
 
-    # Select required variables only (memory optimization)
-    ds = ds[variables]
-
-    return ds
+    return ds[variables]
 
 
-def convert_flux_to_wm2(ds):
-    """
-    Convert accumulated flux (J/m^2) to W/m^2.
-
-    ERA5 accum flux = energy accumulated over previous hour.
-    """
-
+def convert_flux(ds):
     ds["sshf"] = ds["sshf"] / SECONDS_PER_HOUR
     ds["slhf"] = ds["slhf"] / SECONDS_PER_HOUR
-
     ds["sshf"].attrs["units"] = "W m^-2"
     ds["slhf"].attrs["units"] = "W m^-2"
-
     return ds
 
 
-def compute_air_density(sp, t2m):
-    """
-    Compute air density using ideal gas law:
-
-        rho = p / (R_d * T)
-
-    Parameters
-    ----------
-    sp : DataArray
-        Surface pressure [Pa]
-    t2m : DataArray
-        Air temperature at 2m [K]
-
-    Returns
-    -------
-    DataArray
-        Air density [kg/m^3]
-    """
-
+def compute_density(sp, t2m):
     rho = sp / (R_D * t2m)
     rho = rho.rename("rho")
     rho.attrs["units"] = "kg m^-3"
-    rho.attrs["description"] = "Air density computed via ideal gas law"
-
     return rho
 
 
-def perform_sanity_checks(ds):
-    """
-    Perform essential dataset sanity checks.
-    """
+def structural_checks(ds):
+    if not ds.time.to_index().is_monotonic_increasing:
+        raise RuntimeError("Time is not monotonic increasing")
 
-    print("\n========== SANITY CHECK ==========")
-    print("Time range:",
-          str(ds.time.min().values),
-          "→",
-          str(ds.time.max().values))
-
-    print("Total timesteps:", len(ds.time))
-
-    # Basic NaN check
-    print("\nMissing values per variable:")
-    for var in ds.data_vars:
-        print(var, int(ds[var].isnull().sum()))
-
-    # Flux magnitude sanity
-    print("\nMean sshf (W/m^2):",
-          float(ds["sshf"].mean().compute()))
-    print("Mean slhf (W/m^2):",
-          float(ds["slhf"].mean().compute()))
-
-    print("==================================\n")
+    if len(ds.time) != len(np.unique(ds.time)):
+        raise RuntimeError("Duplicate timestamps detected")
 
 
-# ==============================================================
+# =============================
 # MAIN PIPELINE
-# ==============================================================
+# =============================
 
 def main():
 
-    print("Loading ERA5 oper instant...")
-    ds_oper = load_era5_dataset(
-        OPER_INSTANT_PATH,
-        ["u10", "v10", "t2m", "sst"]
-    )
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-    print("Loading ERA5 oper accum...")
-    ds_accum = load_era5_dataset(
-        OPER_ACCUM_PATH,
-        ["sshf", "slhf"]
-    )
+    for year in YEARS:
 
-    print("Loading ERA5 additional parameters...")
-    ds_param = load_era5_dataset(
-        PARAM_INSTANT_PATH,
-        ["sp", "d2m"]
-    )
+        print("\n==============================")
+        print(f"Processing year {year}")
+        print("==============================")
 
-    print("Converting accumulated flux to W/m^2...")
-    ds_accum = convert_flux_to_wm2(ds_accum)
+        if checkpoint_exists(year):
+            print("Checkpoint exists. Skipping.")
+            continue
 
-    print("Computing air density...")
-    rho = compute_air_density(ds_param["sp"], ds_oper["t2m"])
+        print("Loading instant variables...")
+        ds_oper = open_year_dataset(
+            year,
+            "1990-2025",
+            ["u10", "v10", "t2m", "sst"]
+        )
 
-    print("Merging datasets...")
-    ds_final = xr.merge([ds_oper, ds_param, ds_accum, rho])
+        print("Loading accumulated flux...")
+        ds_accum = open_year_dataset(
+            year,
+            "1990-2025",
+            ["sshf", "slhf"]
+        )
 
-    ds_final = ds_final.sortby("time")
+        print("Loading additional parameters...")
+        ds_param = open_year_dataset(
+            year,
+            "1990-2025_add_parameters",
+            ["sp", "d2m"]
+        )
 
-    perform_sanity_checks(ds_final)
+        print("Converting flux to W/m^2...")
+        ds_accum = convert_flux(ds_accum)
 
-    print("Saving compressed NetCDF...")
-    encoding = {var: {"zlib": True, "complevel": 4}
-                for var in ds_final.data_vars}
+        print("Computing air density...")
+        rho = compute_density(ds_param["sp"], ds_oper["t2m"])
 
-    ds_final.to_netcdf(OUTPUT_FILE, encoding=encoding)
+        print("Merging datasets...")
+        ds = xr.merge([ds_oper, ds_param, ds_accum, rho])
 
-    print("Dataset successfully created:", OUTPUT_FILE)
+        # Ensure chronological order
+        ds = ds.sortby("time")
+
+        # Remove duplicate timestamps safely
+        _, unique_index = np.unique(ds["time"], return_index=True)
+        ds = ds.isel(time=np.sort(unique_index))
+
+        print("Running structural checks...")
+        structural_checks(ds)
+
+        # Explicit rechunk for Zarr stability
+        print("Rechunking dataset...")
+        ds = ds.chunk({
+            "time": 24,
+            "latitude": 100,
+            "longitude": 100
+        })
+
+        print("Writing to Zarr (v2)...")
+
+        if not os.path.exists(OUTPUT_ZARR):
+            ds.to_zarr(
+                OUTPUT_ZARR,
+                mode="w",
+                consolidated=True,
+                zarr_version=2
+            )
+        else:
+            ds.to_zarr(
+                OUTPUT_ZARR,
+                mode="a",
+                append_dim="time",
+                consolidated=True,
+                zarr_version=2
+            )
+
+        write_checkpoint(year)
+
+        print(f"Year {year} complete.")
+
+    print("\nAll requested years processed successfully.")
 
 
 if __name__ == "__main__":
