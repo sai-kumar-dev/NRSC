@@ -92,7 +92,7 @@ Each monthly folder must contain:
 Build full dataset (1990–2025):
 
 ```bash
-python cli_industry.py --output full_1990_2025.zarr
+python era5_builder.py --output full_1990_2025.zarr
 ```
 
 ---
@@ -100,7 +100,7 @@ python cli_industry.py --output full_1990_2025.zarr
 # 📆 Build Specific Year Range
 
 ```bash
-python cli_industry.py \
+python era5_builder.py \
   --start 2000 \
   --end 2010 \
   --output era5_2000_2010.zarr
@@ -120,8 +120,8 @@ Supported seasons:
 Example:
 
 ```bash
-python cli_industry.py --season DJF --output djf_all_years.zarr
-python cli_industry.py --season JJA --output jja_all_years.zarr
+python era5_builder.py --season DJF --output djf_all_years.zarr
+python era5_builder.py --season JJA --output jja_all_years.zarr
 ```
 
 ---
@@ -131,13 +131,13 @@ python cli_industry.py --season JJA --output jja_all_years.zarr
 January only:
 
 ```bash
-python cli_industry.py --months 1 --output january_all_years.zarr
+python era5_builder.py --months 1 --output january_all_years.zarr
 ```
 
 Multiple months:
 
 ```bash
-python cli_industry.py --months 6 7 8 --output jja_manual.zarr
+python era5_builder.py --months 6 7 8 --output jja_manual.zarr
 ```
 
 ---
@@ -180,7 +180,7 @@ Compression levels:
 Example fast build:
 
 ```bash
-python cli_industry.py \
+python era5_builder.py \
   --months 1 \
   --chunk 2880 \
   --compression 1 \
