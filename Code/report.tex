@@ -1,0 +1,241 @@
+\documentclass[12pt]{article}
+
+% ------------------ PACKAGES ------------------
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{setspace}
+
+\geometry{margin=1in}
+\onehalfspacing
+
+% ------------------ TITLE ------------------
+
+\title{\textbf{Rationale for Seasonal Stratified Sampling in ERA5-Based Physics-Informed Neural Network Flux Modeling}}
+
+\author{Technical Methodology Report}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% ======================================================
+\section{Introduction}
+
+Physics-Informed Neural Networks (PINNs) were employed to model surface sensible heat flux (sshf) and latent heat flux (slhf) over the Indian Ocean and adjacent Indian subcontinent domain using ERA5 reanalysis data. 
+
+The selected domain exhibits strong intra-annual variability driven by monsoon dynamics, land-sea thermal contrasts, and seasonal atmospheric circulation regimes. This report provides a structured justification for the adoption of \textbf{seasonal stratified sampling} during model training.
+
+The objective of this document is to explain:
+
+\begin{itemize}
+    \item Why seasonal stratification was necessary,
+    \item What limitations it addresses,
+    \item The trade-offs involved,
+    \item Conditions under which it may be removed.
+\end{itemize}
+
+% ======================================================
+\section{Problem Context}
+
+The modeled fluxes depend on state variables including:
+
+\begin{itemize}
+    \item Wind speed
+    \item Air–sea temperature gradient
+    \item Humidity
+    \item Surface pressure
+    \item Sea surface temperature (SST)
+\end{itemize}
+
+These variables exhibit strong seasonal variability in the Indian Ocean region.
+
+The climate system within this domain is non-stationary across the annual cycle, forming four distinct climatological regimes:
+
+\begin{itemize}
+    \item DJF – Winter
+    \item MAM – Pre-monsoon
+    \item JJA – Southwest Monsoon
+    \item SON – Post-monsoon transition
+\end{itemize}
+
+Each regime differs substantially in flux magnitude, variance structure, and governing dynamics.
+
+% ======================================================
+\section{Fundamental Sampling Challenge}
+
+Uniform random sampling across time follows:
+
+\[
+P(\text{sample}) \propto \text{temporal frequency}
+\]
+
+Although months are equally represented in ERA5, the variance of flux magnitudes differs significantly between seasons.
+
+Let:
+
+\[
+\mathcal{L} = \mathcal{L}_{data} + \lambda \mathcal{L}_{physics}
+\]
+
+Gradient descent updates are proportional to:
+
+\[
+\nabla_\theta \mathcal{L}
+\]
+
+High-magnitude flux regimes (e.g., JJA) produce larger residuals, generating disproportionately large gradients.
+
+Thus, stochastic optimization implicitly prioritizes high-variance regimes.
+
+% ======================================================
+\section{Consequences of Non-Stratified Sampling}
+
+Without stratification:
+
+\begin{enumerate}[label=(\alph*)]
+    \item Monsoon regime dominates gradient updates
+    \item Model minimizes large-magnitude errors preferentially
+    \item Winter regime receives fewer effective optimization steps
+\end{enumerate}
+
+This leads to:
+
+\begin{itemize}
+    \item Regime bias
+    \item Reduced seasonal generalization
+    \item Physics residual imbalance
+\end{itemize}
+
+In PINNs, this effect is amplified because physics residuals are nonlinear functions of state variables. Regime-dominant states bias learned physical constraints.
+
+% ======================================================
+\section{Cause–Effect Analysis}
+
+\textbf{Cause:} Seasonal heterogeneity in atmospheric dynamics.
+
+\textbf{Immediate Effect:} Unequal loss magnitudes across seasons.
+
+\textbf{Optimization Effect:} Gradient dominance by high-variance regime.
+
+\textbf{Model Effect:} Regime-specialized solution.
+
+\textbf{Scientific Impact:} Reduced climatological robustness.
+
+% ======================================================
+\section{Seasonal Stratified Sampling Design}
+
+Seasonal stratification enforces:
+
+\[
+P(\text{sample}) = \frac{1}{4} P_{DJF} + \frac{1}{4} P_{MAM} + \frac{1}{4} P_{JJA} + \frac{1}{4} P_{SON}
+\]
+
+For 150,000 samples:
+
+\[
+37,500 \text{ samples per season}
+\]
+
+This ensures balanced gradient contributions across climatological regimes.
+
+% ======================================================
+\section{Statistical Interpretation}
+
+Seasonal stratification modifies the empirical sampling distribution.
+
+Instead of variance-weighted optimization dynamics, it enforces equal representation of mixture components corresponding to seasonal regimes.
+
+This can be interpreted as:
+
+\begin{itemize}
+    \item Implicit regularization
+    \item Regime balancing
+    \item Controlled mixture sampling
+\end{itemize}
+
+% ======================================================
+\section{Advantages}
+
+\begin{itemize}
+    \item Balanced gradient contributions
+    \item Improved seasonal generalization
+    \item Reduced monsoon dominance
+    \item More uniform physics constraint enforcement
+    \item Improved interpretability of training design
+\end{itemize}
+
+% ======================================================
+\section{Limitations and Trade-Offs}
+
+\begin{itemize}
+    \item Deviates from empirical distribution
+    \item Requires predefined seasonal boundaries
+    \item Slightly overweights low-variance regimes
+    \item Adds sampling complexity
+\end{itemize}
+
+% ======================================================
+\section{Hardware and Data Constraints}
+
+The necessity of stratification is influenced by:
+
+\begin{itemize}
+    \item Limited sample budget (150k samples)
+    \item Finite batch sizes
+    \item Single or limited GPU availability
+    \item High dimensionality of ERA5 tensors
+\end{itemize}
+
+Under full-grid training with multi-GPU distributed setups and multi-million sample budgets, natural statistical balance would approximate seasonal fairness.
+
+% ======================================================
+\section{Alternative Approaches}
+
+Alternative mitigation strategies include:
+
+\begin{enumerate}
+    \item Loss weighting by inverse seasonal variance
+    \item Adaptive importance sampling
+    \item Curriculum learning
+    \item Variance-normalized residual scaling
+\end{enumerate}
+
+Seasonal stratification was selected due to simplicity, interpretability, and robustness.
+
+% ======================================================
+\section{Conditions for Removal}
+
+Stratification may be removed if:
+
+\begin{itemize}
+    \item Full-domain tensor training is feasible
+    \item Sample size exceeds $5 \times 10^6$ per epoch
+    \item Explicit seasonal embeddings are introduced
+    \item Distributed high-memory training is available
+\end{itemize}
+
+% ======================================================
+\section{Conclusion}
+
+Seasonal stratified sampling was adopted due to:
+
+\begin{itemize}
+    \item Strong regime-dependent flux dynamics
+    \item Monsoon-dominated variance structure
+    \item Sensitivity of PINN gradients to magnitude imbalance
+    \item Finite sample and hardware constraints
+\end{itemize}
+
+It serves as a controlled correction mechanism ensuring climatological balance during finite-sample training.
+
+This design decision prioritizes seasonal robustness, physics consistency, and scientific interpretability over strict adherence to empirical temporal distribution.
+
+\end{document}
