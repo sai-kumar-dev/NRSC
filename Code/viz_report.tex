@@ -1,0 +1,294 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{setspace}
+
+\onehalfspacing
+
+\title{\textbf{Computational Domain Design and Coastal Treatment Strategy for Physics-Informed Neural Network Based Ocean Surface Flux Prediction using ERA5 Reanalysis}}
+
+\author{
+Sai Kumar Garlapati \\
+Department of Computer Science \\
+Internship Research Work
+}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+
+Accurate prediction of ocean–atmosphere heat fluxes such as Surface Sensible Heat Flux (SSHF) and Surface Latent Heat Flux (SLHF) is critical for climate modeling and atmospheric research. Physics-Informed Neural Networks (PINNs) offer a promising framework for combining observational data with governing physical laws. However, defining the correct spatial domain for physics enforcement remains a major challenge, particularly near coastal regions where land–sea transitions introduce sharp gradients and mixed physical regimes.
+
+This study proposes a systematic framework for defining an ocean computational domain using ERA5 reanalysis data, identifying coastal regions, and designing sampling and loss weighting strategies for PINN training. Several domain definition approaches are analyzed including SST-based masking, fractional land–sea masks, and binary threshold-based domain selection. The proposed approach combines a binary ocean mask derived from ERA5 land–sea mask (LSM), coastal region detection, and region-aware sampling strategies to improve prediction stability near coastlines. Visualization strategies using fractional masks and high-resolution coastlines are also discussed to enhance interpretability and communication.
+
+The resulting framework provides a reproducible and scientifically defensible approach for applying PINNs to ocean flux prediction problems.
+
+\end{abstract}
+
+\section{Introduction}
+
+Ocean–atmosphere interactions play a fundamental role in regulating Earth’s climate system. Surface heat fluxes govern the exchange of energy between the ocean and atmosphere and strongly influence atmospheric circulation, weather patterns, and long-term climate variability.
+
+Two key flux components are:
+
+\begin{itemize}
+\item Surface Sensible Heat Flux (SSHF)
+\item Surface Latent Heat Flux (SLHF)
+\end{itemize}
+
+These fluxes depend on atmospheric variables such as wind speed, humidity, temperature gradients, and pressure.
+
+Traditional numerical models rely on bulk parameterization schemes. However, recent advances in machine learning have introduced \textbf{Physics-Informed Neural Networks (PINNs)}, which incorporate physical laws into neural network training through differential equation constraints.
+
+A major challenge when applying PINNs to ocean prediction tasks is defining the correct spatial domain for physics enforcement. Incorrect domain definition can lead to instability, incorrect boundary conditions, and degraded prediction performance.
+
+This study investigates domain design strategies using ERA5 reanalysis data and proposes a robust computational framework suitable for PINN-based ocean flux prediction.
+
+\section{Data Source}
+
+This work uses ERA5 Reanalysis data produced by the European Centre for Medium-Range Weather Forecasts (ECMWF).
+
+ERA5 provides hourly global atmospheric data with approximately $0.25^\circ$ spatial resolution.
+
+Relevant variables include:
+
+\begin{itemize}
+\item Sea Surface Temperature (SST)
+\item 10m Zonal Wind ($u_{10}$)
+\item 10m Meridional Wind ($v_{10}$)
+\item 2m Temperature ($T_{2m}$)
+\item Mean Sea Level Pressure (MSL)
+\item Land Sea Mask (LSM)
+\end{itemize}
+
+ERA5 is widely used in atmospheric and oceanographic research.
+
+\textbf{Citation:}
+
+Hersbach et al. (2020). ERA5 global reanalysis. Quarterly Journal of the Royal Meteorological Society.
+
+\section{Problem Statement}
+
+ERA5 datasets contain both land and ocean grid cells. Since SSHF and SLHF follow different physical processes over land and ocean, the computational domain for PINN training must be restricted to ocean regions.
+
+However, coastal grid cells often contain both land and ocean fractions, creating ambiguity in domain definition.
+
+Improper domain selection can result in:
+
+\begin{itemize}
+\item Numerical instability
+\item Incorrect physics enforcement
+\item Boundary artifacts
+\item Reduced model accuracy
+\end{itemize}
+
+Therefore a robust ocean domain identification strategy is required.
+
+\section{Domain Definition Approaches}
+
+\subsection{SST Based Masking}
+
+One simple approach is to classify ocean cells using SST availability.
+
+Ocean cells are defined as locations where SST values are not NaN.
+
+Advantages:
+
+\begin{itemize}
+\item Easy to implement
+\item Aligned with ocean temperature data
+\end{itemize}
+
+Limitations:
+
+\begin{itemize}
+\item Coastal cells often misclassified
+\item Dependent on data completeness
+\end{itemize}
+
+\subsection{Fractional Land Sea Mask}
+
+ERA5 provides a fractional land-sea mask with values ranging between 0 and 1.
+
+\begin{itemize}
+\item 0 = ocean
+\item 1 = land
+\end{itemize}
+
+A binary ocean mask can be defined as:
+
+\begin{equation}
+Ocean = 
+\begin{cases}
+1 & \text{if } LSM < 0.5 \\
+0 & \text{otherwise}
+\end{cases}
+\end{equation}
+
+This method provides a stable and physically meaningful ocean classification.
+
+\subsection{Fractional Mask Representation}
+
+Another approach is to retain fractional values without thresholding.
+
+Advantages include smoother coastal visualization.
+
+However, PINNs require clearly defined domains. Partial ocean fractions cannot support physically meaningful PDE enforcement.
+
+Therefore fractional masks are unsuitable for defining the computational domain.
+
+\section{Coastal Region Identification}
+
+Coastal regions represent transitional zones between land and ocean.
+
+A coastal cell is defined as an ocean cell with at least one neighboring land cell.
+
+The domain can therefore be divided into three regions:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+Region & Description \\
+\midrule
+Land & Outside computational domain \\
+Coastal Ocean & Ocean cells adjacent to land \\
+Deep Ocean & Interior ocean cells \\
+\bottomrule
+\end{tabular}
+\caption{Ocean domain classification}
+\end{table}
+
+\section{Impact of Coastal Regions}
+
+Coastal zones are physically complex due to:
+
+\begin{itemize}
+\item Strong temperature gradients
+\item Wind pattern variations
+\item Land–sea thermal contrasts
+\item Moisture variability
+\end{itemize}
+
+These conditions introduce steep gradients that can challenge neural network training.
+
+\section{Sampling Strategy}
+
+Uniform sampling across the domain often leads to insufficient representation of coastal regions.
+
+A stratified sampling strategy is therefore recommended.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lc}
+\toprule
+Region & Sampling Percentage \\
+\midrule
+Deep Ocean & 60\% \\
+Coastal Ocean & 30\% \\
+Random Domain & 10\% \\
+\bottomrule
+\end{tabular}
+\caption{Proposed training sampling distribution}
+\end{table}
+
+\section{Loss Function Design}
+
+The PINN training objective can be expressed as:
+
+\begin{equation}
+L = L_{data} + L_{physics}
+\end{equation}
+
+Where:
+
+\begin{itemize}
+\item $L_{data}$ represents supervised data loss
+\item $L_{physics}$ represents PDE residual loss
+\end{itemize}
+
+To improve coastal prediction accuracy, region-weighted loss functions can be used.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lc}
+\toprule
+Region & Weight \\
+\midrule
+Deep Ocean & 1 \\
+Coastal & 2-3 \\
+\bottomrule
+\end{tabular}
+\caption{Region-based loss weighting}
+\end{table}
+
+\section{Visualization Strategy}
+
+Visualization is important for validating domain design and communicating results.
+
+Two types of visualizations are recommended.
+
+\subsection{Computational Domain Visualization}
+
+Binary masks are used to show the ocean domain used for PINN training.
+
+\subsection{Scientific Visualization}
+
+Fractional masks and high-resolution coastline overlays are used for presentation clarity.
+
+\section{Comparison of Methods}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Method & Accuracy & Stability & PINN Compatibility \\
+\midrule
+SST Mask & Medium & Medium & Good \\
+Fractional Mask & High & Low & Poor \\
+Binary LSM Mask & High & High & Excellent \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of domain definition approaches}
+\end{table}
+
+\section{Limitations}
+
+Several limitations remain:
+
+\begin{itemize}
+\item ERA5 resolution cannot resolve fine coastline structures
+\item Coastal meteorology involves complex mesoscale processes
+\item Explicit coastal boundary conditions are not enforced
+\end{itemize}
+
+Future work may explore multi-resolution grids and adaptive sampling techniques.
+
+\section{Conclusion}
+
+This study presents a structured framework for defining ocean computational domains for PINN-based surface flux prediction using ERA5 data.
+
+Key findings include:
+
+\begin{itemize}
+\item Binary ocean masks derived from ERA5 land-sea mask provide stable computational domains
+\item Coastal regions must be explicitly identified due to their physical complexity
+\item Stratified sampling and region-weighted loss functions improve model stability
+\item Visualization strategies should separate computational domain representation from cartographic clarity
+\end{itemize}
+
+The proposed methodology provides a robust foundation for applying physics-informed learning methods to ocean-atmosphere interaction modeling.
+
+\end{document}
