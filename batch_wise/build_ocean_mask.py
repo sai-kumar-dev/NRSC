@@ -6,6 +6,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from datetime import datetime
 
+
 # ------------------------------------------------
 # CONFIG
 # ------------------------------------------------
@@ -13,10 +14,10 @@ from datetime import datetime
 BASE_PATH = "/data/jayanth_works/era5_inputfluxes/1990-2025"
 OUTPUT_FILE = "ocean_mask.npz"
 
-# sample a few representative years
+# representative years for mask building
 SAMPLE_YEARS = [1990, 2000, 2010, 2020]
 
-# number of time steps per file to check
+# timesteps per file to scan
 TIME_SCAN = 12
 
 FIG_DIR = "mask_figures"
@@ -49,9 +50,13 @@ def find_sst_files():
 
             mpath = os.path.join(ypath, month)
 
+            if not os.path.isdir(mpath):
+                continue
+
             for f in os.listdir(mpath):
 
                 if "sst" in f and f.endswith(".nc"):
+
                     files.append(os.path.join(mpath, f))
                     break
 
@@ -72,21 +77,31 @@ def build_mask(files):
 
         log(f"Scanning {f}")
 
-        ds = xr.open_dataset(f)
+        ds = xr.open_dataset(f, engine="netcdf4")
 
         sst = ds["sst"]
+
+        # detect time dimension
+        if "time" in sst.dims:
+            tdim = "time"
+        elif "valid_time" in sst.dims:
+            tdim = "valid_time"
+        else:
+            raise RuntimeError("No time dimension found in SST dataset")
 
         if lat is None:
             lat = ds["latitude"].values
             lon = ds["longitude"].values
 
-        T = min(TIME_SCAN, sst.shape[0])
+        T = min(TIME_SCAN, sst.sizes[tdim])
 
         valid_any = None
 
         for t in range(T):
 
-            valid = ~np.isnan(sst.isel(time=t).values)
+            sst_slice = sst.isel({tdim: t}).values
+
+            valid = ~np.isnan(sst_slice)
 
             if valid_any is None:
                 valid_any = valid
@@ -152,11 +167,10 @@ def visualize(ocean, lat, lon, lat_vals, lon_vals):
     plt.ylabel("Latitude")
     plt.title("Ocean Mask (Derived from SST)")
 
-    plt.colorbar(label="Ocean=1")
+    plt.colorbar(label="Ocean")
 
-    plt.savefig(os.path.join(FIG_DIR,"mask_grid.png"))
+    plt.savefig(os.path.join(FIG_DIR, "mask_grid.png"))
     plt.close()
-
 
     log("Generating ocean point scatter")
 
@@ -168,7 +182,7 @@ def visualize(ocean, lat, lon, lat_vals, lon_vals):
     plt.ylabel("Latitude")
     plt.title("Ocean Sampling Points")
 
-    plt.savefig(os.path.join(FIG_DIR,"mask_points.png"))
+    plt.savefig(os.path.join(FIG_DIR, "mask_points.png"))
     plt.close()
 
 
@@ -195,6 +209,8 @@ def main():
 
     log("Ocean mask creation complete")
 
+
+# ------------------------------------------------
 
 if __name__ == "__main__":
     main()
